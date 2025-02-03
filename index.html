@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive Particle System</title>
+    <style>
+        body {
+            margin: 0;
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+        }
+        canvas {
+            border: 1px solid #333;
+            background: black;
+        }
+        .controls {
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            width: 250px;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="range"] {
+            width: 200px;
+        }
+        .value-display {
+            font-size: 0.9em;
+            color: #aaa;
+            margin-left: 10px;
+        }
+        select {
+            width: 200px;
+            padding: 5px;
+            background: #333;
+            color: white;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="glCanvas" width="800" height="600"></canvas>
+        <div class="controls">
+            <div class="control-group">
+                <label>Emission Pattern:</label>
+                <select id="emissionPattern">
+                    <option value="bottom">Bottom Stream</option>
+                    <option value="center">Center Burst</option>
+                    <option value="circle">Circle</option>
+                    <option value="rain">Rain</option>
+                    <option value="fountain">Fountain</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Color Scheme:</label>
+                <select id="colorScheme">
+                    <option value="fire">Fire</option>
+                    <option value="water">Water</option>
+                    <option value="magic">Magic</option>
+                    <option value="rainbow">Rainbow</option>
+                    <option value="neon">Neon</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Particle Count: <span id="particleCountValue">2000</span></label>
+                <input type="range" id="particleCount" min="100" max="5000" value="2000">
+            </div>
+            <div class="control-group">
+                <label>Particle Size: <span id="particleSizeValue">8.0</span></label>
+                <input type="range" id="particleSize" min="1" max="20" value="8" step="0.5">
+            </div>
+            <div class="control-group">
+                <label>Gravity Strength: <span id="gravityValue">0.0001</span></label>
+                <input type="range" id="gravity" min="0" max="0.001" value="0.0001" step="0.0001">
+            </div>
+            <div class="control-group">
+                <label>Speed: <span id="speedValue">1.0</span></label>
+                <input type="range" id="speed" min="0.1" max="3.0" value="1.0" step="0.1">
+            </div>
+        </div>
+    </div>
+    <script>
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            const gl = canvas.getContext('webgl');
+
+            if (!gl) {
+                alert('Unable to initialize WebGL');
+                return;
+            }
+
+            let mousePos = { x: 0, y: 0 };
+            let params = {
+                particleCount: 2000,
+                particleSize: 8.0,
+                gravity: 0.0001,
+                speed: 1.0,
+                emissionPattern: 'bottom',
+                colorScheme: 'fire'  
+            };
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                mousePos.x = ((e.clientX - rect.left) / canvas.width) * 2 - 1;
+                mousePos.y = -((e.clientY - rect.top) / canvas.height) * 2 + 1;
+            });
+
+            function setupControls() {
+                const controls = {
+                    particleCount: document.getElementById('particleCount'),
+                    particleSize: document.getElementById('particleSize'),
+                    gravity: document.getElementById('gravity'),
+                    speed: document.getElementById('speed')
+                    
+                };
+
+                Object.entries(controls).forEach(([key, control]) => {
+                    control.addEventListener('input', (e) => {
+                        params[key] = parseFloat(e.target.value);
+                        document.getElementById(`${key}Value`).textContent = params[key];
+                        if (key === 'particleCount') {
+                            initParticles();
+                        }
+                    });
+                });
+
+                document.getElementById('emissionPattern').addEventListener('change', (e) => {
+                    params.emissionPattern = e.target.value;
+                    initParticles();
+                });
+
+                document.getElementById('colorScheme').addEventListener('change', (e) => {
+                    params.colorScheme = e.target.value;
+                    initParticles();
+                });
+            }
+            const vsSource = `
+            attribute vec2 position;
+            attribute vec2 velocity;
+            attribute float age;
+            attribute vec3 color;
+            uniform float time;
+            uniform vec2 mouse;
+            uniform float particleSize;
+            uniform float gravity;
+            uniform float speed;
+            
+            varying vec3 vColor;
+            varying float vAge;
+            
+            void main() {
+                vec2 pos = position;
+                
+                // Enhanced mouse attraction
+                vec2 toMouse = mouse - position;
+                float distToMouse = length(toMouse);
+                
+                // Stronger force that falls off with distance
+                float mouseStrength = 0.002 / (distToMouse + 0.1);
+                vec2 mouseForce = toMouse * mouseStrength;
+                
+                pos += velocity * age * speed;
+                pos += mouseForce * age;
+                
+                // Add circular motion
+                float angle = age * 0.02 * speed;
+                pos.x += sin(angle) * 0.1;
+                pos.y += cos(angle) * 0.1;
+                
+                // Add gravity effect
+                pos.y -= gravity * age * age;
+                
+                gl_Position = vec4(pos, 0.0, 1.0);
+                gl_PointSize = mix(particleSize, particleSize * 0.25, age / 100.0);
+                
+                // Color variation based on mouse proximity, hey QUANYOU
+                float mouseInfluence = smoothstep(1.0, 0.0, distToMouse);
+                vColor = mix(color, vec3(1.0, 0.5, 0.2), mouseInfluence * 0.5);
+                vAge = age;
+            }
+        `;
+
+            const fsSource = `
+                precision mediump float;
+                varying vec3 vColor;
+                varying float vAge;
+                
+                void main() {
+                    vec2 center = gl_PointCoord - vec2(0.5);
+                    float dist = length(center);
+                    if(dist > 0.5) discard;
+                    
+                    float alpha = 1.0 - (vAge / 100.0);
+                    alpha *= smoothstep(0.5, 0.0, dist);
+                    
+                    gl_FragColor = vec4(vColor, alpha);
+                }
+            `;
+
+            function createShader(gl, type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program link error:', gl.getProgramInfoLog(program));
+                return;
+            }
+
+            const locations = {
+                position: gl.getAttribLocation(program, 'position'),
+                velocity: gl.getAttribLocation(program, 'velocity'),
+                age: gl.getAttribLocation(program, 'age'),
+                color: gl.getAttribLocation(program, 'color'),
+                time: gl.getUniformLocation(program, 'time'),
+                mouse: gl.getUniformLocation(program, 'mouse'),
+                particleSize: gl.getUniformLocation(program, 'particleSize'),
+                gravity: gl.getUniformLocation(program, 'gravity'),
+                speed: gl.getUniformLocation(program, 'speed')
+            };
+
+            let particles;
+
+            function getRandomColor(scheme) {
+                switch (scheme) {
+                    case 'fire':
+                        return [
+                            Math.random() * 0.3 + 0.7,  // Red (0.7-1.0)
+                            Math.random() * 0.5 + 0.3,  // Green (0.3-0.8)
+                            Math.random() * 0.2         // Blue (0-0.2)
+                        ];
+                    case 'water':
+                        return [
+                            Math.random() * 0.2,        // Red (0-0.2)
+                            Math.random() * 0.3 + 0.4,  // Green (0.4-0.7)
+                            Math.random() * 0.3 + 0.7   // Blue (0.7-1.0)
+                        ];
+                    case 'magic':
+                        return [
+                            Math.random() * 0.5 + 0.5,  // Red (0.5-1.0)
+                            Math.random() * 0.3,        // Green (0-0.3)
+                            Math.random() * 0.5 + 0.5   // Blue (0.5-1.0)
+                        ];
+                    case 'rainbow':
+                        const hue = Math.random();
+                        const rgb = HSVtoRGB(hue, 0.8, 1.0);
+                        return [rgb.r, rgb.g, rgb.b];
+                    case 'neon':
+                        const neonColors = [
+                            [0.0, 1.0, 0.0],    // Bright Green
+                            [0.2, 0.8, 0.2],    // Medium Green
+                            [0.0, 0.9, 0.4],    // Mint Green
+                            [0.4, 1.0, 0.4]     // Light Green
+                        ];
+                        return neonColors[Math.floor(Math.random() * neonColors.length)];
+                    default:
+                        return [
+                            Math.random() * 0.3 + 0.7,
+                            Math.random() * 0.5 + 0.3,
+                            Math.random() * 0.2
+                        ];
+                }
+            }
+            
+            // Helper function for rainbow color scheme
+            function HSVtoRGB(h, s, v) {
+                let r, g, b;
+                const i = Math.floor(h * 6);
+                const f = h * 6 - i;
+                const p = v * (1 - s);
+                const q = v * (1 - f * s);
+                const t = v * (1 - (1 - f) * s);
+                
+                switch (i % 6) {
+                    case 0: r = v; g = t; b = p; break;
+                    case 1: r = q; g = v; b = p; break;
+                    case 2: r = p; g = v; b = t; break;
+                    case 3: r = p; g = q; b = v; break;
+                    case 4: r = t; g = p; b = v; break;
+                    case 5: r = v; g = p; b = q; break;
+                }
+                
+                return { r, g, b };
+            }
+
+            function getEmissionPosition(pattern) {
+                switch (pattern) {
+                    case 'bottom':
+                        return {
+                            pos: [(Math.random() - 0.5) * 0.5, -1.0],
+                            vel: [(Math.random() - 0.5) * 0.01, Math.random() * 0.02 + 0.01]
+                        };
+                    case 'center':
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = Math.random() * 0.02;
+                        return {
+                            pos: [0, 0],
+                            vel: [Math.cos(angle) * speed, Math.sin(angle) * speed]
+                        };
+                    case 'circle':
+                        const circleAngle = Math.random() * Math.PI * 2;
+                        const radius = 0.8;
+                        return {
+                            pos: [Math.cos(circleAngle) * radius, Math.sin(circleAngle) * radius],
+                            vel: [-Math.cos(circleAngle) * 0.01, -Math.sin(circleAngle) * 0.01]
+                        };
+                    case 'rain':
+                        return {
+                            pos: [(Math.random() - 0.5) * 2, 1.0],
+                            vel: [(Math.random() - 0.5) * 0.001, -0.01]
+                        };
+                    case 'fountain':
+                        const spread = Math.PI / 4;
+                        const baseAngle = -Math.PI/2;
+                        const fountainAngle = baseAngle + (Math.random() - 0.5) * spread;
+                        const fountainSpeed = Math.random() * 0.02 + 0.02;
+                        return {
+                            pos: [0, 0.7],
+                            vel: [Math.cos(fountainAngle) * fountainSpeed, Math.sin(fountainAngle) * fountainSpeed]
+                        };
+                    default:
+                        return {
+                            pos: [(Math.random() - 0.5) * 0.5, -1.0],
+                            vel: [(Math.random() - 0.5) * 0.01, Math.random() * 0.02 + 0.01]
+                        };
+                }
+            }
+            
+
+            function initParticles() {
+                particles = new Float32Array(params.particleCount * 8);
+                for (let i = 0; i < params.particleCount; i++) {
+                    const baseIndex = i * 8;
+                    const emission = getEmissionPosition(params.emissionPattern);
+                    
+                    particles[baseIndex] = emission.pos[0];
+                    particles[baseIndex + 1] = emission.pos[1];
+                    particles[baseIndex + 2] = emission.vel[0];
+                    particles[baseIndex + 3] = emission.vel[1];
+                    particles[baseIndex + 4] = Math.random() * 100;
+                    const color = getRandomColor(params.colorScheme);
+                    particles[baseIndex + 5] = color[0];
+                    particles[baseIndex + 6] = color[1];
+                    particles[baseIndex + 7] = color[2];
+                }
+            }
+
+            function resetParticle(baseIndex) {
+                const emission = getEmissionPosition(params.emissionPattern);
+                particles[baseIndex] = emission.pos[0];
+                particles[baseIndex + 1] = emission.pos[1];
+                particles[baseIndex + 2] = emission.vel[0];
+                particles[baseIndex + 3] = emission.vel[1];
+                particles[baseIndex + 4] = 0;
+                const color = getRandomColor(params.colorScheme);
+                particles[baseIndex + 5] = color[0];
+                particles[baseIndex + 6] = color[1];
+                particles[baseIndex + 7] = color[2];
+            }
+
+            const particleBuffer = gl.createBuffer();
+
+            function render(time) {
+                for (let i = 0; i < params.particleCount; i++) {
+                    const baseIndex = i * 8;
+                    particles[baseIndex + 4] += 0.5 * params.speed;
+                    
+                    let shouldReset = particles[baseIndex + 4] > 100;
+                    switch (params.emissionPattern) {
+                        case 'rain':
+                            shouldReset = shouldReset || particles[baseIndex + 1] < -1.0;
+                            break;
+                        case 'fountain':
+                            shouldReset = shouldReset || particles[baseIndex + 1] < -1.0;
+                            break;
+                        default:
+                            shouldReset = shouldReset || 
+                                        particles[baseIndex + 1] < -1.2 || 
+                                        particles[baseIndex + 1] > 1.2 ||
+                                        particles[baseIndex] < -1.2 || 
+                                        particles[baseIndex] > 1.2;
+                    }
+                    
+                    if (shouldReset) {
+                        resetParticle(baseIndex);
+                    }
+                }
+
+                gl.viewport(0, 0, canvas.width, canvas.height);
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                gl.useProgram(program);
+                gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, particles, gl.DYNAMIC_DRAW);
+
+                gl.enableVertexAttribArray(locations.position);
+                gl.enableVertexAttribArray(locations.velocity);
+                gl.enableVertexAttribArray(locations.age);
+                gl.enableVertexAttribArray(locations.color);
+
+                const stride = 32;
+                gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, stride, 0);
+                gl.vertexAttribPointer(locations.velocity, 2, gl.FLOAT, false, stride, 8);
+                gl.vertexAttribPointer(locations.age, 1, gl.FLOAT, false, stride, 16);
+                gl.vertexAttribPointer(locations.color, 3, gl.FLOAT, false, stride, 20);
+
+                gl.uniform1f(locations.time, time * 0.001);
+                gl.uniform2f(locations.mouse, mousePos.x, mousePos.y);
+                gl.uniform1f(locations.particleSize, params.particleSize);
+                gl.uniform1f(locations.gravity, params.gravity);
+                gl.uniform1f(locations.speed, params.speed);
+
+                gl.enable(gl.BLEND);
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+                gl.drawArrays(gl.POINTS, 0, params.particleCount);
+
+                requestAnimationFrame(render);
+            }
+
+            setupControls();
+            initParticles();
+            requestAnimationFrame(render);
+        }
+
+        main();
+    </script>
+</body>
+</html>
