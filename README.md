@@ -35,9 +35,9 @@ The system uses WebGL shaders for efficient GPU-based rendering:
 
 ## Usage
 
-2. Open `index.html` in a WebGL-compatible browser
-3. Use the control panel to adjust particle behavior
-4. Move your mouse over the canvas to interact with particles
+1. Open `index.html` in a WebGL-compatible browser
+2. Use the control panel to adjust particle behavior
+3. Move your mouse over the canvas to interact with particles
 
 ## Requirements
 
